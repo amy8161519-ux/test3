@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>自製電子書 - 〈破解文言文3〉</title>
+  <style>
+    @page { size: A4; margin: 12mm 15mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body {
+      margin: 0; padding: 0; background-color: #e2e8f0;
+      font-family: "Times New Roman", "標楷體", "DFKai-SB", "BiauKai", serif;
+      font-size: 14pt; line-height: 1.5; color: #111;
+    }
+
+    /* 課堂懸浮工具列 (純 Emoji 極簡膠囊) */
+    .classroom-toolbar {
+      position: fixed; top: 14px; right: 20px; z-index: 9999;
+      display: flex; align-items: center; gap: 3px;
+      background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      padding: 4px 8px; border-radius: 40px;
+      border: 1px solid rgba(203, 213, 225, 0.9);
+      box-shadow: 0 4px 22px rgba(0, 0, 0, 0.12);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .tool-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 36px; height: 36px; font-size: 18px; color: #334155;
+      background: transparent; border: 1px solid transparent; border-radius: 50%;
+      cursor: pointer; transition: all 0.15s ease; padding: 0; user-select: none;
+    }
+    .tool-btn:hover { background: #f1f5f9; transform: scale(1.1); }
+    .tool-btn.active { background: #0f172a; color: #ffffff; }
+    .btn-toggle-ans.active { background: #eff6ff; border-color: #3b82f6; }
+    .toolbar-divider { width: 1px; height: 18px; background: #cbd5e1; margin: 0 3px; }
+
+    /* 章節目錄跳轉選單 */
+    .toc-menu {
+      display: none; position: absolute; top: 46px; left: 0;
+      background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.18); padding: 6px 0;
+      min-width: 260px; max-height: 420px; overflow-y: auto; z-index: 10000;
+    }
+    .toc-menu.show { display: block; animation: tocFadeIn 0.15s ease-out; }
+    @keyframes tocFadeIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .toc-menu-title {
+      padding: 6px 16px 8px 16px; font-size: 13px; font-weight: bold;
+      color: #64748b; border-bottom: 1px solid #f1f5f9;
+    }
+    .toc-menu-item {
+      padding: 8px 16px; font-size: 14px; color: #334155; cursor: pointer;
+      display: flex; align-items: center; justify-content: space-between;
+      transition: background 0.12s, color 0.12s;
+    }
+    .toc-menu-item:hover { background: #eff6ff; color: #2563eb; font-weight: bold; }
+    .toc-page-badge { font-size: 12px; color: #94a3b8; font-weight: normal; }
+    .toc-menu-item:hover .toc-page-badge { color: #2563eb; }
+
+    /* 畫筆面板 */
+    .pen-options {
+      display: none; align-items: center; gap: 6px; background: #f8fafc;
+      padding: 3px 8px; border-radius: 20px; border: 1px solid #e2e8f0; margin-left: 2px;
+    }
+    .color-picker { display: flex; align-items: center; gap: 5px; }
+    .color-dot {
+      width: 16px; height: 16px; border-radius: 50%; cursor: pointer;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2);
+    }
+    .color-dot.active { transform: scale(1.2); box-shadow: 0 0 0 2px #0f172a; }
+    .size-picker { display: flex; align-items: center; gap: 3px; }
+    .size-btn {
+      border: 1px solid #cbd5e1; background: #fff; color: #475569; font-size: 11px;
+      font-weight: bold; padding: 2px 7px; border-radius: 10px; cursor: pointer;
+    }
+    .size-btn.active { background: #0f172a; color: #fff; border-color: #0f172a; }
+
+    /* A4 頁面容器 */
+    .pages-container { padding: 20px 0 40px 0; }
+    .page {
+      width: 210mm; min-height: 297mm; padding: 14mm 16mm; margin: 0 auto 25px auto;
+      background: #ffffff; box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+      page-break-after: always; break-after: page; position: relative;
+    }
+    .drawing-canvas {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      z-index: 20; pointer-events: none;
+    }
+    body.pen-mode .drawing-canvas { pointer-events: auto; cursor: crosshair; }
+
+    /* 頁面標題與結構 */
+    .page-header {
+      display: flex; justify-content: space-between; border-bottom: 2px solid #334155;
+      padding-bottom: 6px; margin-bottom: 10px; font-size: 13pt; font-weight: bold;
+    }
+    .main-title { font-size: 20pt; font-weight: 900; text-align: center; margin: 6px 0 12px 0; }
+    .section-title {
+      font-size: 15pt; font-weight: bold; background: #e2e8f0; padding: 5px 10px;
+      border-radius: 6px; margin: 10px 0 8px 0; border-left: 6px solid #2563eb;
+    }
+    .task-title { font-size: 14pt; font-weight: bold; margin: 8px 0 6px 0; }
+    .reading-box {
+      border: 1.5px solid #475569; background-color: #f8fafc; border-radius: 6px;
+      padding: 8px 12px; margin: 8px 0 14px 0; font-size: 14pt; line-height: 1.75;
+    }
+    .reading-line {
+      padding: 4px 8px; border-radius: 4px; margin-bottom: 2px;
+      display: flex; align-items: baseline; gap: 6px;
+    }
+    .reading-num {
+      flex-shrink: 0; font-weight: bold; color: #334155; width: 22px;
+    }
+    .reading-text {
+      flex: 1; text-align: justify;
+    }
+    .reading-source {
+      text-align: right; margin-top: 6px; padding-right: 8px; font-size: 13pt; color: #334155;
+    }
+    .item-line { padding: 4px 6px; border-radius: 4px; line-height: 1.5; font-size: 14pt; }
+    body:not(.pen-mode) .interactive-item { cursor: pointer; }
+    body:not(.pen-mode) .interactive-item:hover { background-color: #f8fafc; outline: 1px dashed #93c5fd; }
+
+    /* 解答樣式：紅筆圈選與填入 */
+    .correct-choice { display: inline-block; padding: 0 4px; transition: all 0.2s; }
+    .show-ans .correct-choice, .item-line.show-one .correct-choice, .qa-block.show-one .correct-choice, .essay-block.show-one .correct-choice {
+      color: #dc2626 !important; font-weight: bold !important; border: 2px solid #dc2626 !important;
+      border-radius: 14px !important; background-color: #fef2f2 !important; padding: 0 6px !important;
+    }
+    .ans-slot { display: inline-block; min-width: 24px; text-align: center; color: transparent; font-weight: bold; }
+    .show-ans .ans-slot, .item-line.show-one .ans-slot, .qa-block.show-one .ans-slot, .reading-box.show-one .ans-slot { color: #dc2626 !important; }
+    
+    /* 文言文行內括號詞義填空 */
+    .inline-bracket-wrap {
+      white-space: nowrap;
+      display: inline-block;
+    }
+    .inline-blank {
+      display: inline-block; min-width: 52px; text-align: center; color: transparent;
+      font-weight: bold; padding: 0 3px;
+    }
+    .inline-blank-wide {
+      display: inline-block; min-width: 108px; text-align: center; color: transparent;
+      font-weight: bold; padding: 0 3px;
+    }
+    .show-ans .inline-blank, .show-ans .inline-blank-wide,
+    .reading-box.show-one .inline-blank, .reading-box.show-one .inline-blank-wide,
+    .reading-line.show-one .inline-blank, .reading-line.show-one .inline-blank-wide {
+      color: #dc2626 !important;
+    }
+
+    /* 選擇題垂直對齊結構 */
+    .qa-block { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; padding: 6px 8px; border-radius: 6px; }
+    .qa-bracket { flex-shrink: 0; width: 58px; text-align: center; font-weight: bold; font-size: 14pt; white-space: nowrap; }
+    .qa-content { flex: 1; }
+    .qa-options { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+    .underline-kw { text-decoration: underline; text-underline-offset: 4px; }
+    .double-underline-kw { border-bottom: 3px double #111; padding-bottom: 1px; }
+
+    /* 親屬關係樹狀圖 2x2 網格與 SVG 繪圖樣式 */
+    .tree-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px;
+    }
+    .tree-option-card {
+      border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px; background: #fff;
+      transition: all 0.2s;
+    }
+    .tree-option-label { font-weight: bold; font-size: 14pt; margin-bottom: 2px; display: inline-block; }
+    .show-ans .tree-option-card.is-correct-card,
+    .qa-block.show-one .tree-option-card.is-correct-card {
+      border: 2px solid #dc2626 !important; background-color: #fef2f2 !important;
+    }
+    .tree-svg { width: 100%; height: auto; display: block; }
+    .tree-box { fill: #ffffff; stroke: #1e293b; stroke-width: 1.5; }
+    .tree-line { stroke: #1e293b; stroke-width: 1.5; fill: none; }
+    .tree-text { font-family: "標楷體", "DFKai-SB", serif; font-size: 15px; fill: #111; text-anchor: middle; dominant-baseline: central; }
+
+    /* 申論思辨題區塊與作答格線 */
+    .essay-block {
+      margin-bottom: 16px; padding: 8px 10px; border-radius: 6px;
+    }
+    .essay-question { font-weight: bold; margin-bottom: 8px; line-height: 1.6; }
+    .writing-lines {
+      margin-top: 6px;
+    }
+    .writing-line {
+      height: 28px; border-bottom: 1px dashed #94a3b8; width: 100%;
+    }
+    .essay-answer-box {
+      display: none; margin-top: 8px; padding: 10px 12px;
+      background-color: #fef2f2; border: 1.5px solid #dc2626; border-radius: 6px;
+      color: #dc2626; font-size: 14pt; line-height: 1.6;
+    }
+    .show-ans .essay-answer-box, .essay-block.show-one .essay-answer-box {
+      display: block !important;
+    }
+    .show-ans .writing-lines, .essay-block.show-one .writing-lines {
+      display: none !important;
+    }
+
+    /* 思辨比較表格樣式 */
+    table.analysis-table {
+      width: 100%; border-collapse: collapse; margin: 10px 0 8px 0;
+      font-size: 13.5pt; table-layout: fixed;
+    }
+    table.analysis-table th, table.analysis-table td {
+      border: 1.5px solid #1e293b; padding: 8px 10px; vertical-align: middle;
+    }
+    table.analysis-table th {
+      background-color: #f8fafc; font-weight: bold; text-align: center; height: 38px;
+    }
+    table.analysis-table td.row-header {
+      font-weight: bold; text-align: center; background-color: #f8fafc;
+    }
+    table.analysis-table td.ans-cell {
+      height: 82px; vertical-align: top; text-align: left; line-height: 1.45;
+    }
+    .table-ans-text {
+      display: none; color: #dc2626; font-weight: normal; font-size: 13pt;
+    }
+    .show-ans .table-ans-text, .essay-block.show-one .table-ans-text {
+      display: block !important;
+    }
+
+    .toast-notice {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: #0f172a; color: #fff; padding: 10px 20px; border-radius: 30px;
+      font-size: 13px; z-index: 10000; box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      display: none; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    /* 列印強制隱藏解答、目錄與工具列，還原純淨白紙卷 */
+    @media print {
+      body { background: transparent !important; padding: 0 !important; }
+      .no-print, .classroom-toolbar, .toc-menu, .drawing-canvas { display: none !important; }
+      .page { margin: 0 !important; box-shadow: none !important; width: 100% !important; min-height: auto !important; padding: 0 !important; }
+      .correct-choice { color: inherit !important; font-weight: normal !important; border: none !important; background: transparent !important; padding: 0 !important; }
+      .ans-slot, .inline-blank, .inline-blank-wide { color: transparent !important; }
+      .tree-option-card.is-correct-card { border: 1px solid #cbd5e1 !important; background-color: #fff !important; }
+      .essay-answer-box { display: none !important; }
+      .writing-lines { display: block !important; }
+      .table-ans-text { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 課堂懸浮工具列 (純 Emoji 極簡膠囊) -->
+  <div class="classroom-toolbar no-print">
+    <!-- 1. 目錄跳轉按鈕 -->
+    <div style="position: relative;">
+      <button class="tool-btn" id="tocBtn" onclick="toggleTocMenu(event)" title="章節目錄導覽">
+        📑
+      </button>
+      <div class="toc-menu" id="tocMenu">
+        <div class="toc-menu-title">📖 單元章節目錄</div>
+        <div class="toc-menu-item" onclick="jumpTo('page-1')"><span>一、文本詞義解析與會考題</span><span class="toc-page-badge">P.1</span></div>
+        <div class="toc-menu-item" onclick="jumpTo('page-2')"><span>二、跨時代情境選擇題</span><span class="toc-page-badge">P.2</span></div>
+        <div class="toc-menu-item" onclick="jumpTo('sec-essay')"><span>三、深度思辨問答題</span><span class="toc-page-badge">P.2</span></div>
+      </div>
+    </div>
+
+    <!-- 2. 答案開關 -->
+    <button class="tool-btn btn-toggle-ans" id="toggleAllAnsBtn" onclick="toggleAllAnswers()" title="一鍵全開/全隱答案">
+      <span id="ansIcon">👁️</span>
+    </button>
+    
+    <!-- 3. 畫筆開關 -->
+    <button class="tool-btn" id="penBtn" onclick="togglePenMode()" title="螢光筆/板書筆">
+      ✏️
+    </button>
+    
+    <!-- 4. 畫筆選單 (顏色與粗細) -->
+    <div class="pen-options" id="penOptions">
+      <div class="color-picker">
+        <span class="color-dot active" style="background:#facc15;" onclick="setPenColor('rgba(250, 204, 21, 0.45)', this)" title="螢光黃"></span>
+        <span class="color-dot" style="background:#ef4444;" onclick="setPenColor('rgba(239, 68, 68, 0.8)', this)" title="紅筆"></span>
+        <span class="color-dot" style="background:#3b82f6;" onclick="setPenColor('rgba(37, 99, 235, 0.8)', this)" title="藍筆"></span>
+        <span class="color-dot" style="background:#10b981;" onclick="setPenColor('rgba(16, 185, 129, 0.8)', this)" title="綠筆"></span>
+      </div>
+      <div style="width:1px; height:14px; background:#cbd5e1; margin:0 2px;"></div>
+      <div class="size-picker">
+        <button class="size-btn" onclick="setPenSize(4, this)">細</button>
+        <button class="size-btn" onclick="setPenSize(10, this)">中</button>
+        <button class="size-btn active" onclick="setPenSize(20, this)">粗</button>
+      </div>
+    </div>
+    
+    <!-- 5. 清除畫跡 -->
+    <button class="tool-btn" onclick="clearAllDrawings()" title="清除本卷筆跡">
+      🧹
+    </button>
+    
+    <div class="toolbar-divider"></div>
+    
+    <!-- 6. 純淨列印 -->
+    <button class="tool-btn" onclick="smartPrint()" title="列印純淨學生白紙卷">
+      🖨️
+    </button>
+
+    <!-- 7. 新分頁全螢幕開啟 -->
+    <button class="tool-btn" onclick="openInNewTab()" title="在全螢幕獨立分頁中授課">
+      ↗
+    </button>
+  </div>
+
+  <div id="toastNotice" class="toast-notice"></div>
+
+  <!-- A4 頁面內容區 -->
+  <div class="pages-container">
+    
+    <!-- ==================== 第 1 頁 ==================== -->
+    <div class="page" id="page-1">
+      <canvas class="drawing-canvas"></canvas>
+      <div class="page-header">
+        <span>班級：_______ 座號：_______ 姓名：_____________</span>
+        <span>第 1 頁</span>
+      </div>
+
+      <div class="main-title">〈破解文言文 3〉</div>
+
+      <div class="section-title" id="sec-1">● 114 會考題：文本詞義與文意理解</div>
+      <div class="task-title">一、請閱讀以下短文，並將詞性、解釋，寫在括號中：</div>
+
+      <!-- 文言文文本框（分句呈現，每句皆可獨立點擊顯現詞義與補主語答案） -->
+      <div class="reading-box">
+        <div class="reading-line interactive-item" onclick="toggleItemAnswer(this)">
+          <span class="reading-num">1.</span>
+          <span class="reading-text">公子光之父曰吳王諸樊。</span>
+        </div>
+        <div class="reading-line interactive-item" onclick="toggleItemAnswer(this)">
+          <span class="reading-num">2.</span>
+          <span class="reading-text"><span class="inline-bracket-wrap">(<span class="inline-blank">長子</span>)</span>諸樊弟三人：次曰餘祭，次曰夷眛，次曰季子札。</span>
+        </div>
+        <div class="reading-line interactive-item" onclick="toggleItemAnswer(this)">
+          <span class="reading-num">3.</span>
+          <span class="reading-text">諸樊知季子札賢<span class="inline-bracket-wrap">(<span class="inline-blank">賢能</span>)</span>而不立太子，<span class="inline-bracket-wrap">(補主語：<span class="inline-blank">諸樊</span>)</span>以次<span class="inline-bracket-wrap">(<span class="inline-blank-wide">等第、順序</span>)</span>傳三弟，<span class="inline-bracket-wrap">(補主語：<span class="inline-blank">諸樊</span>)</span>欲<span class="inline-bracket-wrap">(<span class="inline-blank">想要</span>)</span>卒<span class="inline-bracket-wrap">(<span class="inline-blank">最終</span>)</span>致<span class="inline-bracket-wrap">(<span class="inline-blank">給予</span>)</span>國於季子札。</span>
+        </div>
+        <div class="reading-line interactive-item" onclick="toggleItemAnswer(this)">
+          <span class="reading-num">4.</span>
+          <span class="reading-text">諸樊既死，傳餘祭。</span>
+        </div>
+        <div class="reading-line interactive-item" onclick="toggleItemAnswer(this)">
+          <span class="reading-num">5.</span>
+          <span class="reading-text">餘祭死，傳夷眛。</span>
+        </div>
+        <div class="reading-line interactive-item" onclick="toggleItemAnswer(this)">
+          <span class="reading-num">6.</span>
+          <span class="reading-text">夷眛死，當<span class="inline-bracket-wrap">(<span class="inline-blank">應當</span>)</span>傳季子札。</span>
+        </div>
+        <div class="reading-line interactive-item" onclick="toggleItemAnswer(this)">
+          <span class="reading-num">7.</span>
+          <span class="reading-text">季子札逃不肯立<span class="inline-bracket-wrap">(<span class="inline-blank">即位</span>)</span>，吳人乃立夷眛之子僚為王。</span>
+        </div>
+        <div class="reading-line interactive-item" onclick="toggleItemAnswer(this)">
+          <span class="reading-num">8.</span>
+          <span class="reading-text">公子光曰：「使以兄弟次<span class="inline-bracket-wrap">(<span class="inline-blank-wide">等第、順序</span>)</span>邪，季子當立<span class="inline-bracket-wrap">(<span class="inline-blank">即位</span>)</span>；必<span class="inline-bracket-wrap">(<span class="inline-blank">一定</span>)</span>以子<span class="inline-bracket-wrap">(<span class="inline-blank-wide">由兒子繼承王位</span>)</span>乎，則光真嫡嗣<span class="inline-bracket-wrap">(<span class="inline-blank-wide">承嗣的嫡子</span>)</span>，<span class="inline-bracket-wrap">(補主語：<span class="inline-blank">我</span>)</span>當<span class="inline-bracket-wrap">(<span class="inline-blank">應當</span>)</span>立<span class="inline-bracket-wrap">(<span class="inline-blank">即位</span>)</span>。」</span>
+        </div>
+        <div class="reading-source">——改寫自司馬遷《史記》</div>
+      </div>
+
+      <!-- 會考第 38 題（含 SVG 精繪親屬關係示意圖） -->
+      <div class="qa-block interactive-item" onclick="toggleItemAnswer(this)">
+        <div class="qa-bracket">(<span class="ans-slot">A</span>)</div>
+        <div class="qa-content">
+          <div>38. 下列何者最可能是文中人物的親屬關係示意圖？</div>
+          <div class="tree-grid">
+            <!-- 選項 (A) 正確答案 -->
+            <div class="tree-option-card is-correct-card">
+              <span class="tree-option-label"><span class="correct-choice">(A)</span></span>
+              <svg class="tree-svg" viewBox="0 0 260 140">
+                <!-- 祖父空框 -->
+                <rect x="105" y="6" width="50" height="24" class="tree-box"/>
+                <line x1="130" y1="30" x2="130" y2="44" class="tree-line"/>
+                <!-- 四兄弟橫線 -->
+                <line x1="35" y1="44" x2="225" y2="44" class="tree-line"/>
+                <line x1="35" y1="44" x2="35" y2="56" class="tree-line"/>
+                <line x1="98" y1="44" x2="98" y2="56" class="tree-line"/>
+                <line x1="162" y1="44" x2="162" y2="56" class="tree-line"/>
+                <line x1="225" y1="44" x2="225" y2="56" class="tree-line"/>
+                <!-- 兄弟方框 -->
+                <rect x="10" y="56" width="50" height="24" class="tree-box"/>
+                <text x="35" y="68" class="tree-text">諸樊</text>
+                <rect x="73" y="56" width="50" height="24" class="tree-box"/>
+                <text x="98" y="68" class="tree-text">餘祭</text>
+                <rect x="137" y="56" width="50" height="24" class="tree-box"/>
+                <text x="162" y="68" class="tree-text">夷眛</text>
+                <rect x="195" y="56" width="60" height="24" class="tree-box"/>
+                <text x="225" y="68" class="tree-text">季子札</text>
+                <!-- 子輩連線與方框 -->
+                <line x1="35" y1="80" x2="35" y2="96" class="tree-line"/>
+                <rect x="17" y="96" width="36" height="24" class="tree-box"/>
+                <text x="35" y="108" class="tree-text">光</text>
+                <line x1="162" y1="80" x2="162" y2="96" class="tree-line"/>
+                <rect x="144" y="96" width="36" height="24" class="tree-box"/>
+                <text x="162" y="108" class="tree-text">僚</text>
+              </svg>
+            </div>
+
+            <!-- 選項 (B) -->
+            <div class="tree-option-card">
+              <span class="tree-option-label">(B)</span>
+              <svg class="tree-svg" viewBox="0 0 260 140">
+                <rect x="105" y="6" width="50" height="24" class="tree-box"/>
+                <line x1="130" y1="30" x2="130" y2="44" class="tree-line"/>
+                <line x1="35" y1="44" x2="225" y2="44" class="tree-line"/>
+                <line x1="35" y1="44" x2="35" y2="56" class="tree-line"/>
+                <line x1="98" y1="44" x2="98" y2="56" class="tree-line"/>
+                <line x1="162" y1="44" x2="162" y2="56" class="tree-line"/>
+                <line x1="225" y1="44" x2="225" y2="56" class="tree-line"/>
+                <rect x="10" y="56" width="50" height="24" class="tree-box"/>
+                <text x="35" y="68" class="tree-text">諸樊</text>
+                <rect x="80" y="56" width="36" height="24" class="tree-box"/>
+                <text x="98" y="68" class="tree-text">光</text>
+                <rect x="137" y="56" width="50" height="24" class="tree-box"/>
+                <text x="162" y="68" class="tree-text">餘祭</text>
+                <rect x="200" y="56" width="50" height="24" class="tree-box"/>
+                <text x="225" y="68" class="tree-text">夷眛</text>
+                <line x1="35" y1="80" x2="35" y2="96" class="tree-line"/>
+                <rect x="5" y="96" width="60" height="24" class="tree-box"/>
+                <text x="35" y="108" class="tree-text">季子札</text>
+                <line x1="225" y1="80" x2="225" y2="96" class="tree-line"/>
+                <rect x="207" y="96" width="36" height="24" class="tree-box"/>
+                <text x="225" y="108" class="tree-text">僚</text>
+              </svg>
+            </div>
+
+            <!-- 選項 (C) -->
+            <div class="tree-option-card">
+              <span class="tree-option-label">(C)</span>
+              <svg class="tree-svg" viewBox="0 0 260 140">
+                <rect x="105" y="6" width="50" height="24" class="tree-box"/>
+                <text x="130" y="18" class="tree-text">諸樊</text>
+                <line x1="130" y1="30" x2="130" y2="44" class="tree-line"/>
+                <line x1="55" y1="44" x2="205" y2="44" class="tree-line"/>
+                <line x1="55" y1="44" x2="55" y2="56" class="tree-line"/>
+                <line x1="130" y1="44" x2="130" y2="56" class="tree-line"/>
+                <line x1="205" y1="44" x2="205" y2="56" class="tree-line"/>
+                <rect x="30" y="56" width="50" height="24" class="tree-box"/>
+                <text x="55" y="68" class="tree-text">餘祭</text>
+                <rect x="105" y="56" width="50" height="24" class="tree-box"/>
+                <text x="130" y="68" class="tree-text">夷眛</text>
+                <rect x="175" y="56" width="60" height="24" class="tree-box"/>
+                <text x="205" y="68" class="tree-text">季子札</text>
+                <line x1="55" y1="80" x2="55" y2="96" class="tree-line"/>
+                <rect x="37" y="96" width="36" height="24" class="tree-box"/>
+                <text x="55" y="108" class="tree-text">光</text>
+                <line x1="130" y1="80" x2="130" y2="96" class="tree-line"/>
+                <rect x="112" y="96" width="36" height="24" class="tree-box"/>
+                <text x="130" y="108" class="tree-text">僚</text>
+              </svg>
+            </div>
+
+            <!-- 選項 (D) -->
+            <div class="tree-option-card">
+              <span class="tree-option-label">(D)</span>
+              <svg class="tree-svg" viewBox="0 0 260 140">
+                <rect x="105" y="6" width="50" height="24" class="tree-box"/>
+                <text x="130" y="18" class="tree-text">諸樊</text>
+                <line x1="130" y1="30" x2="130" y2="44" class="tree-line"/>
+                <line x1="35" y1="44" x2="225" y2="44" class="tree-line"/>
+                <line x1="35" y1="44" x2="35" y2="56" class="tree-line"/>
+                <line x1="98" y1="44" x2="98" y2="56" class="tree-line"/>
+                <line x1="162" y1="44" x2="162" y2="56" class="tree-line"/>
+                <line x1="225" y1="44" x2="225" y2="56" class="tree-line"/>
+                <rect x="17" y="56" width="36" height="24" class="tree-box"/>
+                <text x="35" y="68" class="tree-text">光</text>
+                <rect x="73" y="56" width="50" height="24" class="tree-box"/>
+                <text x="98" y="68" class="tree-text">餘祭</text>
+                <rect x="137" y="56" width="50" height="24" class="tree-box"/>
+                <text x="162" y="68" class="tree-text">夷眛</text>
+                <rect x="195" y="56" width="60" height="24" class="tree-box"/>
+                <text x="225" y="68" class="tree-text">季子札</text>
+                <line x1="162" y1="80" x2="162" y2="96" class="tree-line"/>
+                <rect x="144" y="96" width="36" height="24" class="tree-box"/>
+                <text x="162" y="108" class="tree-text">僚</text>
+              </svg>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 會考第 39 題 -->
+      <div class="qa-block interactive-item" onclick="toggleItemAnswer(this)">
+        <div class="qa-bracket">(<span class="ans-slot">D</span>)</div>
+        <div class="qa-content">
+          <div>39. 根據本文，公子<span class="underline-kw">光</span><span class="double-underline-kw">最無法</span>接受誰擔任<span class="underline-kw">吳王</span>？</div>
+          <div class="qa-options">
+            <div>(A) <span class="underline-kw">餘祭</span></div>
+            <div>(B) <span class="underline-kw">夷眛</span></div>
+            <div>(C) <span class="underline-kw">季子札</span></div>
+            <div><span class="correct-choice">(D) <span class="underline-kw">僚</span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 第 2 頁 ==================== -->
+    <div class="page" id="page-2">
+      <canvas class="drawing-canvas"></canvas>
+      <div class="page-header">
+        <span>班級：_______ 座號：_______ 姓名：_____________</span>
+        <span>第 2 頁</span>
+      </div>
+
+      <div class="section-title" id="sec-2">二、素養延伸與跨時代情境選擇題</div>
+
+      <!-- 素養選擇題 1 -->
+      <div class="qa-block interactive-item" onclick="toggleItemAnswer(this)">
+        <div class="qa-bracket">(<span class="ans-slot">B</span>)</div>
+        <div class="qa-content">
+          <div>1. 在現代企業接班中，若老董事長想將位子傳給有才幹但非家族成員的經理人，卻引發創始家族成員的不滿。老董事長與本課中哪一個角色的處境最相似？</div>
+          <div class="qa-options">
+            <div>(A) 季子札</div>
+            <div><span class="correct-choice">(B) 諸樊</span></div>
+            <div>(C) 僚</div>
+            <div>(D) 公子光</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 素養選擇題 2 -->
+      <div class="qa-block interactive-item" onclick="toggleItemAnswer(this)">
+        <div class="qa-bracket">(<span class="ans-slot">A</span>)</div>
+        <div class="qa-content">
+          <div>2. 季子札「逃不肯立」的行為，在儒家價值觀中可能被視為「謙讓」，但在現代政治責任觀點下，可能會被如何解讀？</div>
+          <div class="qa-options">
+            <div><span class="correct-choice">(A) 一種不負責任、逃避公共職務的行為</span></div>
+            <div>(B) 一種深謀遠慮，為了保護國家的表現</div>
+            <div>(C) 一種展現個人自由意志的進步思想</div>
+            <div>(D) 一種對家族繼承制的強力反抗</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 素養選擇題 3 -->
+      <div class="qa-block interactive-item" onclick="toggleItemAnswer(this)">
+        <div class="qa-bracket">(<span class="ans-slot">B</span>)</div>
+        <div class="qa-content">
+          <div>3. 公子光的行為給現代領導者的啟示為何？</div>
+          <div class="qa-options">
+            <div>(A) 應該無條件服從既有的繼承體制</div>
+            <div><span class="correct-choice">(B) 當感到制度不公時，應從邏輯與法規中尋找自利點</span></div>
+            <div>(C) 只有武力才是解決紛爭的唯一途徑</div>
+            <div>(D) 不需要在乎大眾的評價</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title" id="sec-essay" style="margin-top: 16px;">三、深度思辨與閱讀寫作題</div>
+
+      <!-- 思辨問答題 1 -->
+      <div class="essay-block interactive-item" onclick="toggleItemAnswer(this)">
+        <div class="essay-question">
+          1. 從公子光的論點中，可以看出他對於「繼承權」的詮釋與當時吳王採取的「兄終弟及」策略有何本質上的衝突？請結合文章內容分析公子光如何運用邏輯來挑戰現任吳王僚的合法性。
+        </div>
+        <div class="writing-lines">
+          <div class="writing-line"></div>
+          <div class="writing-line"></div>
+          <div class="writing-line"></div>
+          <div class="writing-line"></div>
+        </div>
+        <div class="essay-answer-box">
+          <strong>【參考解析】</strong><br>
+          公子光的論點建立在對傳統繼承邏輯的拆解與重組。他指出：若遵循「兄終弟及」（諸樊的初衷），應當是由季子札繼位而非僚；若遵循「父死子繼」（嫡長子繼承制），則身為長兄諸樊之子的自己才是真正嫡嗣。這顯示他認為當傳承順序跳過原本的「賢能弟輩」轉向「子輩」時，應回歸宗法制度的正統性，以此證明僚的地位是不正當的，展現其對權力爭奪的細膩思考。
+        </div>
+      </div>
+
+      <!-- 思辨問答題 2（含表格式作答與表格式解答） -->
+      <div class="essay-block interactive-item" onclick="toggleItemAnswer(this)">
+        <div class="essay-question">
+          2. 季子札的「逃而不肯立」展現了高潔的志向，但從國家長治久安的角度來看，你如何評價他的行為？請從「個人道德操守」與「社會政治責任」兩個面向分析其利弊。
+        </div>
+        <table class="analysis-table">
+          <colgroup>
+            <col style="width: 26%;">
+            <col style="width: 37%;">
+            <col style="width: 37%;">
+          </colgroup>
+          <thead>
+            <tr>
+              <th></th>
+              <th>利</th>
+              <th>弊</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="row-header">「個人道德操守」</td>
+              <td class="ans-cell">
+                <div class="table-ans-text">不慕榮利、謹守禮讓分際，樹立高潔清廉的賢者典範，免於陷入宮廷權力鬥爭的道德汙點。</div>
+              </td>
+              <td class="ans-cell">
+                <div class="table-ans-text">過度執著於個人潔身自愛與名節，忽略在關鍵時刻承擔家族與國政重任的道德勇氣。</div>
+              </td>
+            </tr>
+            <tr>
+              <td class="row-header">「社會政治責任」</td>
+              <td class="ans-cell">
+                <div class="table-ans-text">避免因個人被動繼位而直接與長兄之子（公子光）爆發正面衝突，暫時維持王室表面的和諧。</div>
+              </td>
+              <td class="ans-cell">
+                <div class="table-ans-text">導致諸樊「兄終弟及」的傳位布局徹底崩潰，王位落入僚手中，形成權力真空與正統性爭議，最終引發「專諸刺王僚」的流血政變與國家動盪。</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="essay-answer-box">
+          <strong>【綜合評析】</strong><br>
+          優異學生應能展現辯證思考。在個人道德操守上，季札不慕榮利、守禮讓，被視為賢者典範。但在社會政治責任上，他的逃避使諸樊預設的傳位計畫崩潰，導致王位落入僚手中，進而給了公子光發動政變（史實中的專諸刺王僚）的藉口。學生若能分析出「個人的清高可能導致體制不穩定」或「賢者不適當的隱逸可能引發權力真空」，即符合高層次思考。
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 互動腳本 -->
+  <script>
+    // 0. 目錄面板切換與平滑跳轉
+    function toggleTocMenu(e) {
+      if (e) e.stopPropagation();
+      const menu = document.getElementById('tocMenu');
+      if (menu) menu.classList.toggle('show');
+    }
+
+    function jumpTo(targetId) {
+      const el = document.getElementById(targetId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      const menu = document.getElementById('tocMenu');
+      if (menu) menu.classList.remove('show');
+    }
+
+    document.addEventListener('click', (e) => {
+      const menu = document.getElementById('tocMenu');
+      const btn = document.getElementById('tocBtn');
+      if (menu && menu.classList.contains('show')) {
+        if (!menu.contains(e.target) && e.target !== btn) {
+          menu.classList.remove('show');
+        }
+      }
+    });
+
+    // 1. 逐題點擊顯現答案
+    function toggleItemAnswer(el) {
+      if (document.body.classList.contains('pen-mode')) return;
+      el.classList.toggle('show-one');
+    }
+
+    // 2. 一鍵全開 / 全隱答案
+    var isAllAnsShown = false;
+    function toggleAllAnswers() {
+      isAllAnsShown = !isAllAnsShown;
+      var container = document.querySelector('.pages-container');
+      var btn = document.getElementById('toggleAllAnsBtn');
+      var btnIcon = document.getElementById('ansIcon');
+      if (isAllAnsShown) {
+        container.classList.add('show-ans'); btn.classList.add('active'); btnIcon.textContent = '🙈';
+      } else {
+        container.classList.remove('show-ans'); btn.classList.remove('active'); btnIcon.textContent = '👁️';
+        document.querySelectorAll('.show-one').forEach(function(item) { item.classList.remove('show-one'); });
+      }
+    }
+
+    // 3. 畫筆工具（支援滑鼠與觸控板書）
+    var isPenMode = false;
+    var currentPenColor = 'rgba(250, 204, 21, 0.45)';
+    var currentPenSize = 20;
+    function setPenColor(color, el) {
+      currentPenColor = color;
+      document.querySelectorAll('.color-dot').forEach(function(d) { d.classList.remove('active'); });
+      el.classList.add('active');
+    }
+    function setPenSize(size, el) {
+      currentPenSize = size;
+      document.querySelectorAll('.size-btn').forEach(function(b) { b.classList.remove('active'); });
+      el.classList.add('active');
+    }
+    function togglePenMode() {
+      isPenMode = !isPenMode;
+      document.body.classList.toggle('pen-mode', isPenMode);
+      var penBtn = document.getElementById('penBtn');
+      var penOptions = document.getElementById('penOptions');
+      if (isPenMode) { penBtn.classList.add('active'); if (penOptions) penOptions.style.display = 'flex'; }
+      else { penBtn.classList.remove('active'); if (penOptions) penOptions.style.display = 'none'; }
+    }
+    function initCanvases() {
+      document.querySelectorAll('.page').forEach(function(page) {
+        var canvas = page.querySelector('.drawing-canvas');
+        if (!canvas) return;
+        var ctx = canvas.getContext('2d');
+        function resizeCanvas() { canvas.width = page.clientWidth; canvas.height = page.clientHeight; }
+        resizeCanvas(); window.addEventListener('resize', resizeCanvas);
+        var isDrawing = false, lastX = 0, lastY = 0;
+
+        function getPos(clientX, clientY) {
+          var rect = canvas.getBoundingClientRect();
+          return { x: clientX - rect.left, y: clientY - rect.top };
+        }
+
+        canvas.addEventListener('mousedown', function(e) {
+          if (!isPenMode) return; isDrawing = true;
+          var pos = getPos(e.clientX, e.clientY); lastX = pos.x; lastY = pos.y;
+        });
+        canvas.addEventListener('mousemove', function(e) {
+          if (!isDrawing || !isPenMode) return;
+          var pos = getPos(e.clientX, e.clientY);
+          ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(pos.x, pos.y);
+          ctx.strokeStyle = currentPenColor; ctx.lineWidth = currentPenSize; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
+          lastX = pos.x; lastY = pos.y;
+        });
+        window.addEventListener('mouseup', function() { isDrawing = false; });
+
+        canvas.addEventListener('touchstart', function(e) {
+          if (!isPenMode) return;
+          e.preventDefault();
+          isDrawing = true;
+          var touch = e.touches[0];
+          var pos = getPos(touch.clientX, touch.clientY); lastX = pos.x; lastY = pos.y;
+        }, { passive: false });
+        canvas.addEventListener('touchmove', function(e) {
+          if (!isDrawing || !isPenMode) return;
+          e.preventDefault();
+          var touch = e.touches[0];
+          var pos = getPos(touch.clientX, touch.clientY);
+          ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(pos.x, pos.y);
+          ctx.strokeStyle = currentPenColor; ctx.lineWidth = currentPenSize; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
+          lastX = pos.x; lastY = pos.y;
+        }, { passive: false });
+        window.addEventListener('touchend', function() { isDrawing = false; });
+      });
+    }
+    window.addEventListener('load', initCanvases);
+    function clearAllDrawings() {
+      document.querySelectorAll('.drawing-canvas').forEach(function(canvas) {
+        var ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, canvas.width, canvas.height);
+      });
+    }
+
+    function showToast(msg) {
+      var toast = document.getElementById('toastNotice');
+      if (!toast) return;
+      toast.textContent = msg;
+      toast.style.display = 'block';
+      setTimeout(function() { toast.style.display = 'none'; }, 3000);
+    }
+
+    // 4. 智慧新分頁純淨輸出白紙卷
+    function getCleanWorksheetHTML(triggerPrintImmediately) {
+      var clonedDoc = document.documentElement.cloneNode(true);
+      var container = clonedDoc.querySelector('.pages-container');
+      if (container) container.classList.remove('show-ans');
+      clonedDoc.querySelectorAll('.show-one').forEach(function(item) {
+        item.classList.remove('show-one');
+      });
+      var toast = clonedDoc.querySelector('#toastNotice');
+      if (toast) toast.remove();
+
+      if (triggerPrintImmediately) {
+        var autoPrintScript = document.createElement('script');
+        autoPrintScript.textContent = 'window.addEventListener("load", function() { setTimeout(function() { window.print(); }, 400); });';
+        clonedDoc.querySelector('body').appendChild(autoPrintScript);
+      }
+      return '<!DOCTYPE html>\n<html lang="zh-TW">' + clonedDoc.innerHTML + '</html>';
+    }
+
+    function smartPrint() {
+      try {
+        var htmlContent = getCleanWorksheetHTML(true);
+        var blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+        var blobUrl = URL.createObjectURL(blob);
+        var win = window.open(blobUrl, '_blank');
+        if (!win) {
+          showToast('若列印視窗未跳出，請點擊「↗」或允許彈跳視窗！');
+          window.print();
+        }
+      } catch (e) {
+        window.print();
+      }
+    }
+
+    function openInNewTab() {
+      try {
+        var htmlContent = getCleanWorksheetHTML(false);
+        var blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+        var blobUrl = URL.createObjectURL(blob);
+        var win = window.open(blobUrl, '_blank');
+        if (!win) {
+          showToast('請允許瀏覽器彈出式視窗，以順利在新分頁打開講義！');
+        }
+      } catch (e) {
+        showToast('無法在新分頁開啟，請嘗試手動下載。');
+      }
+    }
+  </script>
+</body>
+</html>
